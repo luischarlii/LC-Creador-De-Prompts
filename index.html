@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Creador de prompts</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Prompts">
+<meta name="theme-color" content="#7c3aed">
+<link rel="apple-touch-icon" href="icon-180.png">
+<style>
+  :root {
+    --bg: #ffffff; --fg: #111827; --muted: #6b7280; --line: #e5e7eb;
+    --accent: #7c3aed; --card: #f3f4f6; --err: #dc2626;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0b0f19; --fg: #f3f4f6; --muted: #9ca3af; --line: #1f2937;
+            --accent: #a78bfa; --card: #151b2b; --err: #f87171; }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(110px + env(safe-area-inset-bottom, 0px));
+    max-width: 600px; margin: 0 auto;
+  }
+  h1 { margin: 0 0 4px; font-size: 28px; }
+  h2 { margin: 26px 0 8px; font-size: 16px; color: var(--muted); font-weight: 600; }
+  .sub { color: var(--muted); font-size: 14px; margin: 0 0 14px; }
+  button { font: inherit; cursor: pointer; }
+
+  #types { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; scrollbar-width: none; }
+  #types::-webkit-scrollbar { display: none; }
+  .type {
+    flex: none; padding: 9px 14px; border-radius: 999px; border: 1px solid var(--line);
+    background: var(--card); color: var(--fg); font-size: 14px; white-space: nowrap;
+  }
+  .type.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+
+  .fld { margin-top: 14px; }
+  .fld label { display: block; font-size: 14px; font-weight: 600; margin-bottom: 5px; }
+  .fld .opt { font-weight: 400; color: var(--muted); }
+  input, textarea, select {
+    width: 100%; padding: 12px 14px; font: inherit; font-size: 16px; border-radius: 12px;
+    border: 1px solid var(--line); background: var(--card); color: var(--fg); outline: none;
+  }
+  textarea { resize: vertical; min-height: 76px; }
+  input:focus, textarea:focus, select:focus { border-color: var(--accent); }
+
+  details { margin-top: 18px; border: 1px solid var(--line); border-radius: 12px; padding: 4px 14px 14px; }
+  summary { cursor: pointer; padding: 10px 0; font-weight: 600; font-size: 14px; }
+  .chk { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 15px; }
+  .chk input { width: 22px; height: 22px; flex: none; }
+
+  #out { min-height: 160px; font-size: 15px; line-height: 1.5; font-family: ui-monospace, Menlo, monospace; }
+  .meta { font-size: 13px; color: var(--muted); margin-top: 6px; }
+
+  .bar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
+    background: var(--bg); border-top: 1px solid var(--line);
+  }
+  .bar-in { max-width: 600px; margin: 0 auto; display: flex; gap: 8px; }
+  .bar button {
+    flex: 1; padding: 13px 8px; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--card); color: var(--fg); font-weight: 600;
+  }
+  .bar button.main { background: var(--accent); border-color: var(--accent); color: #fff; flex: 2; }
+  .bar button:disabled { opacity: .45; }
+
+  .item { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .item .txt { flex: 1; min-width: 0; text-align: left; background: none; border: 0; color: inherit; padding: 0; }
+  .item .t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item .k { font-size: 13px; color: var(--muted); }
+  .item .x { background: none; border: 0; color: var(--muted); font-size: 18px; padding: 6px 8px; }
+
+  #toast {
+    position: fixed; left: 50%; bottom: calc(90px + env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%); background: var(--fg); color: var(--bg);
+    padding: 10px 16px; border-radius: 999px; font-size: 14px; opacity: 0;
+    pointer-events: none; transition: opacity .2s; z-index: 6;
+  }
+  #toast.show { opacity: 1; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<h1>Creador de prompts</h1>
+<p class="sub">Llena lo básico y se arma solo un prompt listo para pegar en cualquier IA.</p>
+
+<div id="types"></div>
+<div id="form"></div>
+
+<details>
+  <summary>Opciones avanzadas</summary>
+  <div class="fld">
+    <label for="role">Rol de la IA <span class="opt">(opcional)</span></label>
+    <input id="role" placeholder="Ej.: chef profesional. Si lo dejas vacío, se elige uno según el tipo" autocomplete="off">
+  </div>
+  <div class="fld">
+    <label for="respLang">La IA debe responder en</label>
+    <select id="respLang"></select>
+  </div>
+  <div class="fld">
+    <label for="promptLang">Idioma del prompt</label>
+    <select id="promptLang"></select>
+  </div>
+  <label class="chk"><input type="checkbox" id="ask"> Que me haga preguntas si le falta información</label>
+</details>
+
+<h2>Tu prompt</h2>
+<textarea id="out" placeholder="Completa los campos de arriba y tu prompt aparecerá aquí. Puedes editarlo antes de copiarlo."></textarea>
+<div id="count" class="meta"></div>
+
+<div id="lib-box" hidden>
+  <h2>Guardados</h2>
+  <div id="lib"></div>
+</div>
+
+<div class="bar">
+  <div class="bar-in">
+    <button id="save" disabled>Guardar</button>
+    <button id="share" disabled>Compartir</button>
+    <button id="copy" class="main" disabled>Copiar prompt</button>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+// <build>
+// ---------- Opciones (valor, texto en español, texto en inglés) ----------
+const OPT = {
+  tone: [
+    ['', 'Sin preferencia', ''],
+    ['neutral', 'Neutral', 'neutral'],
+    ['formal', 'Formal', 'formal'],
+    ['cercano', 'Cercano y amable', 'friendly and warm'],
+    ['divertido', 'Divertido', 'fun and light-hearted'],
+    ['tecnico', 'Técnico', 'technical'],
+    ['persuasivo', 'Persuasivo', 'persuasive'],
+    ['empatico', 'Empático', 'empathetic']
+  ],
+  format: [
+    ['', 'Sin preferencia', ''],
+    ['parrafos', 'Párrafos', 'paragraphs'],
+    ['vinetas', 'Lista con viñetas', 'a bullet-point list'],
+    ['pasos', 'Pasos numerados', 'numbered steps'],
+    ['tabla', 'Tabla', 'a table'],
+    ['esquema', 'Esquema con títulos', 'an outline with headings']
+  ],
+  length: [
+    ['', 'Sin límite', ''],
+    ['corta', 'Corta (un párrafo)', 'short (about one paragraph)'],
+    ['media', 'Media (3 a 5 párrafos)', 'medium (3 to 5 paragraphs)'],
+    ['larga', 'Larga y detallada', 'long and detailed']
+  ],
+  detail: [
+    ['', 'Sin preferencia', ''],
+    ['solo', 'Solo el código', 'code only'],
+    ['breve', 'Código con explicación breve', 'code with a short explanation'],
+    ['pasos', 'Paso a paso, para aprender', 'step by step, so I can learn']
+  ],
+  ratio: [
+    ['', 'Sin preferencia', ''],
+    ['1:1', 'Cuadrado (1:1)', '1:1'],
+    ['4:5', 'Retrato (4:5)', '4:5'],
+    ['9:16', 'Vertical (9:16)', '9:16'],
+    ['16:9', 'Horizontal (16:9)', '16:9']
+  ],
+  n: [
+    ['', 'Sin preferencia', ''],
+    ['5', '5', '5'],
+    ['10', '10', '10'],
+    ['20', '20', '20']
+  ],
+  respLang: [
+    ['es', 'Español', 'Spanish'],
+    ['en', 'Inglés', 'English'],
+    ['pt', 'Portugués', 'Portuguese'],
+    ['fr', 'Francés', 'French'],
+    ['de', 'Alemán', 'German'],
+    ['it', 'Italiano', 'Italian'],
+    ['same', 'El mismo idioma de mi mensaje', 'the same language as my message']
+  ],
+  promptLang: [
+    ['es', 'Español', 'Spanish'],
+    ['en', 'English', 'English']
+  ]
+};
+
+// ---------- Campos disponibles ----------
+// t: ta = área de texto, in = línea, sel = lista (opt)
+const FIELDS = {
+  goal:      { t: 'ta',  label: '¿Qué quieres lograr?', ph: '' },
+  tipoTexto: { t: 'in',  label: 'Tipo de texto', ph: 'Ej.: publicación para Instagram, discurso, descripción de producto', optional: true },
+  source:    { t: 'ta',  label: 'Texto', ph: 'Pega aquí el texto', rows: 6 },
+  context:   { t: 'ta',  label: 'Contexto o detalles importantes', ph: 'Datos, situación, lo que la IA debe saber', optional: true },
+  audience:  { t: 'in',  label: '¿Para quién es?', ph: 'Ej.: clientes jóvenes, mi jefe, niños de 10 años', optional: true },
+  tone:      { t: 'sel', label: 'Tono', opt: 'tone', optional: true },
+  format:    { t: 'sel', label: 'Formato de la respuesta', opt: 'format', optional: true },
+  length:    { t: 'sel', label: 'Extensión', opt: 'length', optional: true },
+  avoid:     { t: 'ta',  label: 'Restricciones o cosas a evitar', ph: 'Ej.: sin tecnicismos, sin emojis, no más de 100 palabras', optional: true },
+  example:   { t: 'ta',  label: 'Ejemplo de cómo debe verse el resultado', ph: 'Pega un ejemplo si tienes uno', optional: true },
+  lang:      { t: 'in',  label: 'Lenguaje o tecnología', ph: 'Ej.: Python, JavaScript, Excel' },
+  detail:    { t: 'sel', label: 'Nivel de detalle', opt: 'detail', optional: true },
+  dest:      { t: 'in',  label: 'Destinatario', ph: 'Ej.: mi casero, un cliente, recursos humanos', optional: true },
+  sign:      { t: 'in',  label: 'Tu nombre para la firma', ph: '', optional: true },
+  from:      { t: 'in',  label: 'Idioma de origen', ph: 'Ej.: inglés (o déjalo vacío para que lo detecte)', optional: true },
+  to:        { t: 'in',  label: 'Traducir a', ph: 'Ej.: español de México' },
+  n:         { t: 'sel', label: 'Cantidad de ideas', opt: 'n', optional: true },
+  estilo:    { t: 'in',  label: 'Estilo', ph: 'Ej.: acuarela, fotografía realista, anime, 3D', optional: true },
+  encuadre:  { t: 'in',  label: 'Encuadre', ph: 'Ej.: primer plano, vista aérea, plano general', optional: true },
+  luz:       { t: 'in',  label: 'Iluminación', ph: 'Ej.: luz de atardecer, neón, luz suave de estudio', optional: true },
+  colores:   { t: 'in',  label: 'Colores', ph: 'Ej.: tonos cálidos, azul y dorado', optional: true },
+  ratio:     { t: 'sel', label: 'Formato de la imagen', opt: 'ratio', optional: true }
+};
+
+// ---------- Tipos de prompt ----------
+const TYPES = {
+  texto: {
+    name: '✍️ Escribir', roleEs: 'un redactor profesional con experiencia', roleEn: 'an experienced professional writer',
+    fields: ['goal', 'tipoTexto', 'context', 'audience', 'tone', 'format', 'length', 'avoid', 'example'],
+    over: { goal: { label: '¿Qué quieres que escriba?', ph: 'Ej.: la presentación de mi cafetería para redes sociales' } },
+    req: ['goal']
+  },
+  resumir: {
+    name: '📄 Resumir', roleEs: 'un analista experto en síntesis de información', roleEn: 'an analyst who is an expert at summarizing information',
+    fields: ['source', 'goal', 'audience', 'format', 'length', 'avoid'],
+    over: { source: { label: 'Texto a resumir' }, goal: { label: '¿Qué te interesa del resumen?', ph: 'Ej.: solo las fechas y decisiones', optional: true } },
+    req: ['source']
+  },
+  explicar: {
+    name: '🎓 Explicar', roleEs: 'un profesor paciente y claro', roleEn: 'a patient, clear teacher',
+    fields: ['goal', 'context', 'audience', 'tone', 'format', 'length', 'avoid'],
+    over: { goal: { label: '¿Qué quieres entender?', ph: 'Ej.: cómo funciona la inflación' }, audience: { label: 'Tu nivel', ph: 'Ej.: principiante, sé lo básico, soy estudiante de prepa' } },
+    req: ['goal']
+  },
+  codigo: {
+    name: '💻 Código', roleEs: 'un programador senior', roleEn: 'a senior software engineer',
+    fields: ['goal', 'lang', 'context', 'detail', 'avoid', 'example'],
+    over: { goal: { label: '¿Qué necesitas que haga el código?', ph: 'Ej.: una función que ordene una lista de contactos por apellido' }, context: { label: 'Código existente o detalles', ph: 'Pega tu código o los datos de entrada' } },
+    req: ['goal']
+  },
+  correo: {
+    name: '✉️ Mensaje', roleEs: 'un experto en comunicación escrita', roleEn: 'an expert in written communication',
+    fields: ['goal', 'dest', 'sign', 'context', 'tone', 'length', 'avoid'],
+    over: { goal: { label: '¿Qué quieres decir?', ph: 'Ej.: pedir una prórroga para pagar la renta' } },
+    req: ['goal']
+  },
+  traducir: {
+    name: '🌐 Traducir', roleEs: 'un traductor profesional', roleEn: 'a professional translator',
+    fields: ['source', 'from', 'to', 'tone', 'avoid'],
+    over: { source: { label: 'Texto a traducir' } },
+    req: ['source', 'to']
+  },
+  ideas: {
+    name: '💡 Ideas', roleEs: 'un consultor creativo', roleEn: 'a creative consultant',
+    fields: ['goal', 'n', 'context', 'audience', 'tone', 'avoid'],
+    over: { goal: { label: '¿Sobre qué quieres ideas?', ph: 'Ej.: nombres para mi tienda de plantas' } },
+    req: ['goal']
+  },
+  imagen: {
+    name: '🎨 Imagen', roleEs: '', roleEn: '',
+    fields: ['goal', 'estilo', 'encuadre', 'luz', 'colores', 'ratio', 'avoid'],
+    over: { goal: { label: '¿Qué quieres ver en la imagen?', ph: 'Ej.: un gato naranja durmiendo en una biblioteca antigua' }, avoid: { label: 'Qué no debe aparecer', ph: 'Ej.: texto, marcas de agua, manos deformes' } },
+    req: ['goal']
+  },
+  libre: {
+    name: '🧩 Libre', roleEs: 'un asistente experto en el tema', roleEn: 'an expert assistant on the topic',
+    fields: ['goal', 'context', 'audience', 'tone', 'format', 'length', 'avoid', 'example'],
+    over: { goal: { label: '¿Qué necesitas?', ph: 'Describe tu tarea con tus palabras' } },
+    req: ['goal']
+  }
+};
+
+// ---------- Textos del prompt ----------
+const ES = {
+  act: r => `Actúa como ${r}.`,
+  h: { goal: 'Objetivo', tipoTexto: 'Tipo de texto', source: 'Texto', context: 'Contexto', audience: 'Público',
+       tone: 'Tono', format: 'Formato de la respuesta', length: 'Extensión', avoid: 'Restricciones (qué evitar)',
+       example: 'Ejemplo del resultado esperado', lang: 'Lenguaje o tecnología', detail: 'Nivel de detalle',
+       dest: 'Destinatario', sign: 'Firma', from: 'Idioma de origen', to: 'Idioma de destino', n: 'Cantidad de ideas',
+       instr: 'Instrucciones' },
+  respond: l => `Responde en ${l}.`,
+  ask: 'Si te falta información importante, hazme preguntas antes de responder.',
+  instr: {
+    resumir: 'Resume conservando las ideas principales y sin añadir información que no esté en el texto.',
+    explicar: 'Explica con ejemplos sencillos y evita la jerga innecesaria.',
+    codigo: 'Escribe código claro y funcional. Indica cómo ejecutarlo si hace falta.',
+    correo: 'Entrega el mensaje listo para enviar, con asunto si es un correo.',
+    traducir: 'Traduce de forma natural, conservando el sentido y el tono. No agregues comentarios.',
+    ideas: 'Entrega ideas variadas y concretas, no genéricas.'
+  },
+  img: { make: 'Crea una imagen de', style: 'Estilo', frame: 'Encuadre', light: 'Iluminación', colors: 'Colores', ratio: 'Formato', avoid: 'Evita' }
+};
+const EN = {
+  act: r => `Act as ${r}.`,
+  h: { goal: 'Goal', tipoTexto: 'Type of text', source: 'Text', context: 'Context', audience: 'Audience',
+       tone: 'Tone', format: 'Response format', length: 'Length', avoid: 'Constraints (what to avoid)',
+       example: 'Example of the expected result', lang: 'Language or technology', detail: 'Level of detail',
+       dest: 'Recipient', sign: 'Signature', from: 'Source language', to: 'Target language', n: 'Number of ideas',
+       instr: 'Instructions' },
+  respond: l => `Respond in ${l}.`,
+  ask: 'If you are missing important information, ask me questions before answering.',
+  instr: {
+    resumir: 'Summarize keeping the main ideas and without adding information that is not in the text.',
+    explicar: 'Explain with simple examples and avoid unnecessary jargon.',
+    codigo: 'Write clear, working code. Explain how to run it if needed.',
+    correo: 'Deliver the message ready to send, with a subject line if it is an email.',
+    traducir: 'Translate naturally, keeping the meaning and tone. Do not add comments.',
+    ideas: 'Give varied, concrete ideas, not generic ones.'
+  },
+  img: { make: 'Create an image of', style: 'Style', frame: 'Framing', light: 'Lighting', colors: 'Colors', ratio: 'Aspect ratio', avoid: 'Avoid' }
+};
+
+// ---------- Armado del prompt ----------
+function optLabel(key, value, en) {
+  const o = OPT[key].find(x => x[0] === value);
+  return o && o[0] ? (en ? o[2] : o[1]) : '';
+}
+
+function isReady(k, v) {
+  return TYPES[k].req.every(id => (v[id] || '').trim());
+}
+
+function build(k, v) {
+  const t = TYPES[k];
+  const en = v.promptLang === 'en';
+  const S = en ? EN : ES;
+  const g = id => (v[id] || '').trim();
+
+  if (k === 'imagen') {
+    const bits = [`${S.img.make}: ${g('goal')}`];
+    if (g('estilo')) bits.push(`${S.img.style}: ${g('estilo')}`);
+    if (g('encuadre')) bits.push(`${S.img.frame}: ${g('encuadre')}`);
+    if (g('luz')) bits.push(`${S.img.light}: ${g('luz')}`);
+    if (g('colores')) bits.push(`${S.img.colors}: ${g('colores')}`);
+    const r = optLabel('ratio', v.ratio, en);
+    if (r) bits.push(`${S.img.ratio}: ${r}`);
+    if (g('avoid')) bits.push(`${S.img.avoid}: ${g('avoid')}`);
+    return bits.join('. ') + '.';
+  }
+
+  const role = g('role') || (en ? t.roleEn : t.roleEs);
+  const out = [S.act(role)];
+
+  // valor de cada campo, ya listo para mostrar
+  const value = id => {
+    const def = FIELDS[id];
+    if (def.t === 'sel') return optLabel(def.opt, v[id], en);
+    if (id === 'source') return g('source') ? '"""\n' + g('source') + '\n"""' : '';
+    return g(id);
+  };
+  const sec = id => {
+    const body = value(id);
+    return body ? `## ${S.h[id]}\n${body}` : '';
+  };
+
+  t.fields.forEach(id => { const s = sec(id); if (s) out.push(s); });
+
+  // instrucciones finales
+  const instr = [];
+  if (S.instr[k]) instr.push(S.instr[k]);
+  if (k !== 'traducir' && v.respLang) {
+    const rl = optLabel('respLang', v.respLang, en);
+    instr.push(S.respond(en ? rl : rl.toLowerCase()));
+  }
+  if (v.ask) instr.push(S.ask);
+  if (instr.length) out.push(`## ${S.h.instr}\n` + instr.map(x => '- ' + x).join('\n'));
+
+  return out.join('\n\n');
+}
+// </build>
+
+// ---------- Estado ----------
+const LIB_KEY = 'prompts:lib';
+const STATE_KEY = 'prompts:state';
+let cur = 'texto';
+let vals = { respLang: 'es', promptLang: 'es' };
+let lib = [];
+
+function load(key, fallback) {
+  try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch (e) { return fallback; }
+}
+function store(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {}
+}
+
+let toastTimer;
+function toast(t) {
+  const el = $('toast');
+  el.textContent = t;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
+}
+
+// ---------- Interfaz ----------
+function renderTypes() {
+  const box = $('types');
+  box.innerHTML = '';
+  Object.entries(TYPES).forEach(([k, t]) => {
+    const b = document.createElement('button');
+    b.className = 'type' + (k === cur ? ' on' : '');
+    b.textContent = t.name;
+    b.addEventListener('click', () => { cur = k; renderTypes(); renderForm(); update(); });
+    box.appendChild(b);
+  });
+}
+
+function fieldEl(id) {
+  const def = FIELDS[id];
+  const o = (TYPES[cur].over || {})[id] || {};
+  const label = o.label || def.label;
+  const ph = o.ph !== undefined ? o.ph : (def.ph || '');
+  const optional = o.optional !== undefined ? o.optional : def.optional;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'fld';
+  const lab = document.createElement('label');
+  lab.textContent = label;
+  if (optional) {
+    const s = document.createElement('span');
+    s.className = 'opt';
+    s.textContent = ' (opcional)';
+    lab.appendChild(s);
+  }
+
+  let ctl;
+  if (def.t === 'sel') {
+    ctl = document.createElement('select');
+    OPT[def.opt].forEach(([val, es]) => {
+      const op = document.createElement('option');
+      op.value = val;
+      op.textContent = es;
+      ctl.appendChild(op);
+    });
+  } else if (def.t === 'ta') {
+    ctl = document.createElement('textarea');
+    ctl.rows = def.rows || 3;
+    ctl.placeholder = ph;
+  } else {
+    ctl = document.createElement('input');
+    ctl.placeholder = ph;
+    ctl.autocomplete = 'off';
+  }
+  ctl.value = vals[id] || '';
+  const ev = def.t === 'sel' ? 'change' : 'input';
+  ctl.addEventListener(ev, () => { vals[id] = ctl.value; update(); });
+
+  wrap.append(lab, ctl);
+  return wrap;
+}
+
+function renderForm() {
+  const box = $('form');
+  box.innerHTML = '';
+  TYPES[cur].fields.forEach(id => box.appendChild(fieldEl(id)));
+}
+
+function update() {
+  const ready = isReady(cur, vals);
+  const text = ready ? build(cur, vals) : '';
+  $('out').value = text;
+  $('count').textContent = text
+    ? `${text.split(/\s+/).filter(Boolean).length} palabras · ${text.length} caracteres`
+    : '';
+  ['copy', 'share', 'save'].forEach(id => { $(id).disabled = !ready; });
+  store(STATE_KEY, { cur, vals });
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (e) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (e2) {}
+    ta.remove();
+  }
+}
+
+// ---------- Guardados ----------
+function renderLib() {
+  const box = $('lib');
+  box.innerHTML = '';
+  $('lib-box').hidden = !lib.length;
+  lib.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'item';
+
+    const txt = document.createElement('button');
+    txt.className = 'txt';
+    const t = document.createElement('div');
+    t.className = 't';
+    t.textContent = item.title;
+    const k = document.createElement('div');
+    k.className = 'k';
+    k.textContent = (TYPES[item.type] || {}).name || '';
+    txt.append(t, k);
+    txt.addEventListener('click', () => {
+      cur = item.type in TYPES ? item.type : 'libre';
+      vals = Object.assign({ respLang: 'es', promptLang: 'es' }, item.vals);
+      syncAdvanced();
+      renderTypes();
+      renderForm();
+      update();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      toast('Prompt cargado');
+    });
+
+    const x = document.createElement('button');
+    x.className = 'x';
+    x.textContent = '✕';
+    x.setAttribute('aria-label', 'Quitar');
+    x.addEventListener('click', () => {
+      lib = lib.filter(i => i.id !== item.id);
+      store(LIB_KEY, lib);
+      renderLib();
+    });
+
+    row.append(txt, x);
+    box.appendChild(row);
+  });
+}
+
+// ---------- Opciones avanzadas ----------
+function fillSelect(id, key) {
+  const s = $(id);
+  OPT[key].forEach(([val, es]) => {
+    const op = document.createElement('option');
+    op.value = val;
+    op.textContent = es;
+    s.appendChild(op);
+  });
+  s.addEventListener('change', () => { vals[id] = s.value; update(); });
+}
+function syncAdvanced() {
+  $('role').value = vals.role || '';
+  $('respLang').value = vals.respLang || 'es';
+  $('promptLang').value = vals.promptLang || 'es';
+  $('ask').checked = !!vals.ask;
+}
+
+fillSelect('respLang', 'respLang');
+fillSelect('promptLang', 'promptLang');
+$('role').addEventListener('input', e => { vals.role = e.target.value; update(); });
+$('ask').addEventListener('change', e => { vals.ask = e.target.checked; update(); });
+
+// ---------- Botones ----------
+$('copy').addEventListener('click', async () => {
+  await copyText($('out').value);
+  toast('Prompt copiado');
+});
+$('share').addEventListener('click', async () => {
+  try {
+    if (navigator.share) await navigator.share({ text: $('out').value });
+    else { await copyText($('out').value); toast('Prompt copiado'); }
+  } catch (e) { /* cancelado */ }
+});
+$('save').addEventListener('click', () => {
+  const base = (vals.goal || vals.source || '').trim().replace(/\s+/g, ' ');
+  lib.unshift({
+    id: Date.now(), type: cur, vals: Object.assign({}, vals),
+    title: base.length > 48 ? base.slice(0, 48) + '…' : base
+  });
+  lib = lib.slice(0, 30);
+  store(LIB_KEY, lib);
+  renderLib();
+  toast('Guardado');
+});
+
+// ---------- Inicio ----------
+(function init() {
+  const saved = load(STATE_KEY, null);
+  if (saved && saved.cur in TYPES) {
+    cur = saved.cur;
+    vals = Object.assign(vals, saved.vals || {});
+  }
+  lib = load(LIB_KEY, []);
+  syncAdvanced();
+  renderTypes();
+  renderForm();
+  renderLib();
+  update();
+})();
+</script>
+</body>
+</html>
