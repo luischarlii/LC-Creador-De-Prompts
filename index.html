@@ -83,6 +83,37 @@
     pointer-events: none; transition: opacity .2s; z-index: 6;
   }
   #toast.show { opacity: 1; }
+  .go {
+    width: 100%; padding: 14px; border: 0; border-radius: 12px; font-weight: 700;
+    background: var(--accent); color: #fff;
+  }
+  .go:disabled { opacity: .5; }
+  .exs { display: flex; gap: 8px; overflow-x: auto; padding: 10px 0 2px; align-items: center; scrollbar-width: none; }
+  .exs::-webkit-scrollbar { display: none; }
+  .exs .lbl { font-size: 13px; color: var(--muted); flex: none; }
+  .ex {
+    flex: none; padding: 7px 12px; border-radius: 999px; border: 1px dashed var(--accent);
+    background: none; color: var(--accent); font-size: 13px;
+  }
+  .seg { display: flex; gap: 8px; margin-top: 14px; }
+  .seg button {
+    flex: 1; padding: 11px; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--card); color: var(--fg); font-weight: 600;
+  }
+  .seg button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .pick {
+    width: 100%; margin-top: 12px; padding: 18px; border-radius: 14px;
+    border: 2px dashed var(--line); background: var(--card); color: var(--fg); font-weight: 600;
+  }
+  .thumbs { display: flex; gap: 6px; overflow-x: auto; margin-top: 12px; }
+  .thumbs figure { margin: 0; flex: none; text-align: center; }
+  .thumbs img { height: 84px; border-radius: 8px; display: block; }
+  .thumbs figcaption { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .an-note { font-size: 13px; color: var(--muted); margin-top: 12px; }
+  .an-status { font-size: 14px; margin-top: 10px; min-height: 1.3em; }
+  .an-actions { display: flex; gap: 8px; margin-top: 12px; }
+  .an-actions .go { flex: 1; width: auto; }
+  .stop { padding: 0 18px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); color: var(--fg); }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -91,6 +122,7 @@
 <p class="sub">Llena lo básico y se arma solo un prompt listo para pegar en cualquier IA.</p>
 
 <div id="types"></div>
+<div id="examples" class="exs" hidden></div>
 <div id="form"></div>
 
 <details>
@@ -171,6 +203,14 @@ const OPT = {
     ['9:16', 'Vertical (9:16)', '9:16'],
     ['16:9', 'Horizontal (16:9)', '16:9']
   ],
+  dur: [
+    ['', 'Sin preferencia', ''],
+    ['5', '5 segundos', '5 seconds'],
+    ['10', '10 segundos', '10 seconds'],
+    ['15', '15 segundos', '15 seconds'],
+    ['30', '30 segundos', '30 seconds'],
+    ['60', '1 minuto', '1 minute']
+  ],
   n: [
     ['', 'Sin preferencia', ''],
     ['5', '5', '5'],
@@ -216,7 +256,10 @@ const FIELDS = {
   encuadre:  { t: 'in',  label: 'Encuadre', ph: 'Ej.: primer plano, vista aérea, plano general', optional: true },
   luz:       { t: 'in',  label: 'Iluminación', ph: 'Ej.: luz de atardecer, neón, luz suave de estudio', optional: true },
   colores:   { t: 'in',  label: 'Colores', ph: 'Ej.: tonos cálidos, azul y dorado', optional: true },
-  ratio:     { t: 'sel', label: 'Formato de la imagen', opt: 'ratio', optional: true }
+  ratio:     { t: 'sel', label: 'Formato de la imagen', opt: 'ratio', optional: true },
+  camara:    { t: 'in',  label: 'Movimiento de cámara', ph: 'Ej.: travelling lento hacia adelante, cámara fija, toma aérea con dron', optional: true },
+  duracion:  { t: 'sel', label: 'Duración', opt: 'dur', optional: true },
+  sonido:    { t: 'in',  label: 'Sonido o música', ph: 'Ej.: música suave de guitarra, sonido ambiente, sin diálogo', optional: true }
 };
 
 // ---------- Tipos de prompt ----------
@@ -269,6 +312,16 @@ const TYPES = {
     over: { goal: { label: '¿Qué quieres ver en la imagen?', ph: 'Ej.: un gato naranja durmiendo en una biblioteca antigua' }, avoid: { label: 'Qué no debe aparecer', ph: 'Ej.: texto, marcas de agua, manos deformes' } },
     req: ['goal']
   },
+  video: {
+    name: '🎬 Video', roleEs: '', roleEn: '',
+    fields: ['goal', 'estilo', 'camara', 'encuadre', 'luz', 'colores', 'duracion', 'ratio', 'sonido', 'avoid'],
+    over: {
+      goal: { label: '¿Qué escena quieres ver?', ph: 'Ej.: un dron sobrevuela un pueblo en la sierra al amanecer' },
+      ratio: { label: 'Formato del video' },
+      avoid: { label: 'Qué no debe aparecer', ph: 'Ej.: texto en pantalla, marcas de agua, cortes bruscos' }
+    },
+    req: ['goal']
+  },
   libre: {
     name: '🧩 Libre', roleEs: 'un asistente experto en el tema', roleEn: 'an expert assistant on the topic',
     fields: ['goal', 'context', 'audience', 'tone', 'format', 'length', 'avoid', 'example'],
@@ -295,7 +348,8 @@ const ES = {
     traducir: 'Traduce de forma natural, conservando el sentido y el tono. No agregues comentarios.',
     ideas: 'Entrega ideas variadas y concretas, no genéricas.'
   },
-  img: { make: 'Crea una imagen de', style: 'Estilo', frame: 'Encuadre', light: 'Iluminación', colors: 'Colores', ratio: 'Formato', avoid: 'Evita' }
+  img: { make: 'Crea una imagen de', style: 'Estilo', frame: 'Encuadre', light: 'Iluminación', colors: 'Colores', ratio: 'Formato', avoid: 'Evita' },
+  vid: { make: 'Crea un video de', style: 'Estilo', camera: 'Movimiento de cámara', frame: 'Encuadre', light: 'Iluminación', colors: 'Colores', dur: 'Duración', ratio: 'Formato', sound: 'Sonido', avoid: 'Evita' }
 };
 const EN = {
   act: r => `Act as ${r}.`,
@@ -314,7 +368,8 @@ const EN = {
     traducir: 'Translate naturally, keeping the meaning and tone. Do not add comments.',
     ideas: 'Give varied, concrete ideas, not generic ones.'
   },
-  img: { make: 'Create an image of', style: 'Style', frame: 'Framing', light: 'Lighting', colors: 'Colors', ratio: 'Aspect ratio', avoid: 'Avoid' }
+  img: { make: 'Create an image of', style: 'Style', frame: 'Framing', light: 'Lighting', colors: 'Colors', ratio: 'Aspect ratio', avoid: 'Avoid' },
+  vid: { make: 'Create a video of', style: 'Style', camera: 'Camera movement', frame: 'Framing', light: 'Lighting', colors: 'Colors', dur: 'Duration', ratio: 'Aspect ratio', sound: 'Sound', avoid: 'Avoid' }
 };
 
 // ---------- Armado del prompt ----------
@@ -342,6 +397,23 @@ function build(k, v) {
     const r = optLabel('ratio', v.ratio, en);
     if (r) bits.push(`${S.img.ratio}: ${r}`);
     if (g('avoid')) bits.push(`${S.img.avoid}: ${g('avoid')}`);
+    return bits.join('. ') + '.';
+  }
+
+  if (k === 'video') {
+    const V = S.vid;
+    const bits = [`${V.make}: ${g('goal')}`];
+    if (g('estilo')) bits.push(`${V.style}: ${g('estilo')}`);
+    if (g('camara')) bits.push(`${V.camera}: ${g('camara')}`);
+    if (g('encuadre')) bits.push(`${V.frame}: ${g('encuadre')}`);
+    if (g('luz')) bits.push(`${V.light}: ${g('luz')}`);
+    if (g('colores')) bits.push(`${V.colors}: ${g('colores')}`);
+    const d = optLabel('dur', v.duracion, en);
+    if (d) bits.push(`${V.dur}: ${d}`);
+    const r = optLabel('ratio', v.ratio, en);
+    if (r) bits.push(`${V.ratio}: ${r}`);
+    if (g('sonido')) bits.push(`${V.sound}: ${g('sonido')}`);
+    if (g('avoid')) bits.push(`${V.avoid}: ${g('avoid')}`);
     return bits.join('. ') + '.';
   }
 
@@ -374,6 +446,58 @@ function build(k, v) {
 
   return out.join('\n\n');
 }
+// ---------- Análisis de imagen / video ----------
+function ratioLabel(w, h) {
+  const r = w / h;
+  const c = [['16:9', 16 / 9], ['9:16', 9 / 16], ['1:1', 1], ['4:3', 4 / 3], ['3:4', 3 / 4],
+             ['4:5', 4 / 5], ['21:9', 21 / 9], ['3:2', 3 / 2], ['2:3', 2 / 3]];
+  let best = c[0], d = Infinity;
+  for (const x of c) { const e = Math.abs(r - x[1]); if (e < d) { d = e; best = x; } }
+  return d < 0.03 ? best[0] : `${w}:${h}`;
+}
+
+function analysisPrompt(mode, meta, extra, en) {
+  const out = en ? 'inglés' : 'español';
+  const neg = en ? 'Negative prompt:' : 'Prompt negativo:';
+  const snd = en ? 'Suggested sound:' : 'Sonido sugerido:';
+  const rules = [
+    'Describe solo lo que se ve; no inventes elementos que no aparezcan.',
+    'No identifiques a personas reales ni menciones su parecido con alguien; descríbelas en general (edad aproximada, ropa, pose, expresión).',
+    'Si hay texto legible, escríbelo entre comillas.',
+    'Redáctalo como una instrucción directa para el generador: no digas “la imagen”, “el video” ni “los fotogramas”.',
+    `Escribe el resultado en ${out}.`
+  ].map(r => '- ' + r).join('\n');
+  const change = extra ? `\nAdemás, aplica este cambio respecto al original: ${extra}\n` : '';
+
+  if (mode === 'imagen') {
+    return `Eres un experto en escribir prompts para generadores de imágenes con IA.
+Mira la imagen adjunta y escribe UN prompt que permita recrearla lo más fielmente posible.
+Incluye, de forma concreta y ordenada: sujeto(s) y su apariencia; acción o pose; entorno y fondo; composición (tipo de plano, ángulo, lente o profundidad de campo); iluminación; paleta de colores; estilo o medio visual (fotografía, óleo, 3D, anime, etc.); texturas y detalles; ambiente emocional; relación de aspecto aproximada.
+${change}
+Reglas:
+${rules}
+
+Formato de respuesta: primero el prompt completo en un solo bloque de texto, sin títulos ni introducción. Después, en una línea nueva que empiece con "${neg}", una lista corta de cosas que conviene evitar para no desviarse del original.`;
+  }
+
+  const m = meta || {};
+  const intro = m.times
+    ? `Te paso ${m.times.length} fotogramas del mismo video, en orden cronológico, tomados en los segundos ${m.times.join(', ')}.`
+    : `Te paso ${m.shots || 'varias'} capturas del mismo video, en orden cronológico.`;
+  const data = m.dur
+    ? `Datos del video: duración ${m.dur} s; formato ${ratioLabel(m.w, m.h)} (${m.w}×${m.h}).`
+    : '';
+  return `Eres un experto en escribir prompts para generadores de video con IA (como Sora, Veo, Runway o Kling).
+${intro}
+${data}
+Escribe UN prompt que permita recrear el video lo más fielmente posible. Incluye, de forma concreta: sujeto(s) y apariencia; escenario; la acción y cómo evoluciona con el tiempo (por tramos, con los segundos aproximados); movimiento de cámara (deducido al comparar los fotogramas: fijo, paneo, travelling, zoom, dron, etc.); encuadre y tipo de plano; iluminación; paleta de colores; estilo visual; ritmo (plano continuo o cortes); duración y formato.
+No puedes oír el audio ni ver lo que ocurre entre fotogramas. Cuando algo sea una deducción, exprésalo con prudencia ("parece que…"). Cierra el prompt con una línea "${snd}" que proponga un ambiente sonoro coherente con la escena, aclarando que es una sugerencia.
+${change}
+Reglas:
+${rules}
+
+Formato de respuesta: el prompt completo en un solo bloque de texto, sin introducción. Después, en una línea nueva que empiece con "${neg}", una lista corta de cosas que conviene evitar para no desviarse del original.`;
+}
 // </build>
 
 // ---------- Estado ----------
@@ -400,15 +524,28 @@ function toast(t) {
 }
 
 // ---------- Interfaz ----------
+function selectType(k) {
+  cur = k;
+  if (k === 'analizar') $('out').value = analysis.text || '';
+  renderTypes();
+  renderForm();
+  renderExamples();
+  update();
+}
+
 function renderTypes() {
   const box = $('types');
   box.innerHTML = '';
-  Object.entries(TYPES).forEach(([k, t]) => {
+  const chip = (k, name) => {
     const b = document.createElement('button');
     b.className = 'type' + (k === cur ? ' on' : '');
-    b.textContent = t.name;
-    b.addEventListener('click', () => { cur = k; renderTypes(); renderForm(); update(); });
+    b.textContent = name;
+    b.addEventListener('click', () => selectType(k));
     box.appendChild(b);
+  };
+  Object.entries(TYPES).forEach(([k, t]) => {
+    if (k === 'libre') chip('analizar', ANALYZE_NAME);
+    chip(k, t.name);
   });
 }
 
@@ -457,15 +594,22 @@ function fieldEl(id) {
 }
 
 function renderForm() {
+  if (cur === 'analizar') { renderAnalyzer(); return; }
   const box = $('form');
   box.innerHTML = '';
   TYPES[cur].fields.forEach(id => box.appendChild(fieldEl(id)));
 }
 
 function update() {
-  const ready = isReady(cur, vals);
-  const text = ready ? build(cur, vals) : '';
-  $('out').value = text;
+  let ready, text;
+  if (cur === 'analizar') {
+    text = $('out').value;
+    ready = !!text.trim() && !an.busy;
+  } else {
+    ready = isReady(cur, vals);
+    text = ready ? build(cur, vals) : '';
+    $('out').value = text;
+  }
   $('count').textContent = text
     ? `${text.split(/\s+/).filter(Boolean).length} palabras · ${text.length} caracteres`
     : '';
@@ -504,14 +648,21 @@ function renderLib() {
     t.textContent = item.title;
     const k = document.createElement('div');
     k.className = 'k';
-    k.textContent = (TYPES[item.type] || {}).name || '';
+    k.textContent = item.type === 'analizar' ? ANALYZE_NAME : ((TYPES[item.type] || {}).name || '');
     txt.append(t, k);
     txt.addEventListener('click', () => {
-      cur = item.type in TYPES ? item.type : 'libre';
-      vals = Object.assign({ respLang: 'es', promptLang: 'es' }, item.vals);
-      syncAdvanced();
+      if (item.type === 'analizar') {
+        cur = 'analizar';
+        analysis.text = item.text || '';
+        $('out').value = analysis.text;
+      } else {
+        cur = item.type in TYPES ? item.type : 'libre';
+        vals = Object.assign({ respLang: 'es', promptLang: 'es' }, item.vals);
+        syncAdvanced();
+      }
       renderTypes();
       renderForm();
+      renderExamples();
       update();
       window.scrollTo({ top: 0, behavior: 'smooth' });
       toast('Prompt cargado');
@@ -567,21 +718,420 @@ $('share').addEventListener('click', async () => {
   } catch (e) { /* cancelado */ }
 });
 $('save').addEventListener('click', () => {
-  const base = (vals.goal || vals.source || '').trim().replace(/\s+/g, ' ');
-  lib.unshift({
+  const isAn = cur === 'analizar';
+  const base = (isAn ? $('out').value : (vals.goal || vals.source || '')).trim().replace(/\s+/g, ' ');
+  const item = {
     id: Date.now(), type: cur, vals: Object.assign({}, vals),
     title: base.length > 48 ? base.slice(0, 48) + '…' : base
-  });
+  };
+  if (isAn) item.text = $('out').value;
+  lib.unshift(item);
   lib = lib.slice(0, 30);
   store(LIB_KEY, lib);
   renderLib();
   toast('Guardado');
 });
 
+// ---------- Ejemplos ----------
+const EXAMPLES = {
+  texto: [
+    { name: 'Presentar mi negocio', vals: { goal: 'La presentación de mi cafetería de barrio para redes sociales', tipoTexto: 'publicación para Instagram', audience: 'vecinos y jóvenes de la colonia', tone: 'cercano', length: 'corta', avoid: 'no exagerar ni usar más de 3 emojis' } },
+    { name: 'Brindis de boda', vals: { goal: 'Un brindis de 1 minuto para la boda de mi mejor amigo', tipoTexto: 'discurso', tone: 'divertido', length: 'corta' } }
+  ],
+  resumir: [
+    { name: 'Resumir un texto', vals: { source: 'La energía solar fotovoltaica convierte la luz del sol en electricidad mediante celdas de silicio. En los últimos diez años su costo ha bajado más de 80 %, lo que la ha vuelto la fuente nueva más barata en muchos países. Sin embargo, su producción depende del clima y de la hora del día, por lo que necesita baterías u otras fuentes que compensen.', goal: 'Quiero las ideas clave y una conclusión', format: 'vinetas', length: 'corta' } }
+  ],
+  explicar: [
+    { name: 'La inflación', vals: { goal: 'Cómo funciona la inflación y por qué suben los precios', audience: 'principiante, sin estudios de economía', tone: 'cercano', format: 'esquema' } },
+    { name: 'Para un niño', vals: { goal: 'Qué es el internet y cómo llega un video a mi celular', audience: 'un niño de 10 años', length: 'corta' } }
+  ],
+  codigo: [
+    { name: 'Ordenar contactos', vals: { goal: 'Una función que ordene una lista de contactos por apellido y luego por nombre', lang: 'Python', detail: 'breve' } },
+    { name: 'Fórmula de Excel', vals: { goal: 'Una fórmula que sume las ventas de un mes específico', lang: 'Excel', detail: 'pasos' } }
+  ],
+  correo: [
+    { name: 'Pedir una prórroga', vals: { goal: 'Pedir una prórroga de 10 días para pagar la renta de este mes', dest: 'mi casero', tone: 'formal', length: 'corta' } },
+    { name: 'Reclamo por producto', vals: { goal: 'Reclamar un producto que llegó dañado y pedir el reembolso', dest: 'servicio al cliente de una tienda en línea', tone: 'formal' } }
+  ],
+  traducir: [
+    { name: 'Inglés a español', vals: { source: 'Thank you for your patience. We will get back to you within two business days.', to: 'español de México', tone: 'formal' } },
+    { name: 'Español a inglés', vals: { source: '¿Quedamos mañana para comer? Yo invito.', from: 'español', to: 'inglés', tone: 'cercano' } }
+  ],
+  ideas: [
+    { name: 'Nombres para tienda', vals: { goal: 'Nombres para una tienda de plantas en línea', n: '10', tone: 'divertido' } },
+    { name: 'Ideas de regalo', vals: { goal: 'Ideas de regalo para una persona a la que le gusta el café', n: '10', context: 'Presupuesto de 500 pesos' } }
+  ],
+  imagen: [
+    { name: 'Gato en biblioteca', vals: { goal: 'Un gato naranja durmiendo en una biblioteca antigua', estilo: 'acuarela', luz: 'luz cálida de tarde entrando por la ventana', colores: 'tonos cálidos, ocre y marrón', ratio: '4:5', avoid: 'texto, marcas de agua' } },
+    { name: 'Astronauta', vals: { goal: 'Un astronauta caminando por un desierto de dunas rojas', estilo: 'fotografía cinematográfica realista', encuadre: 'plano general, ángulo bajo', luz: 'atardecer', ratio: '16:9' } }
+  ],
+  video: [
+    { name: 'Dron en la sierra', vals: { goal: 'Un dron sobrevuela un pueblo en la sierra al amanecer', estilo: 'cinematográfico, realista', camara: 'toma aérea lenta hacia adelante', luz: 'luz dorada del amanecer', duracion: '10', ratio: '16:9', sonido: 'sonido ambiente y guitarra suave', avoid: 'texto en pantalla' } },
+    { name: 'Café en día de lluvia', vals: { goal: 'Una taza de café humeante sobre una mesa de madera junto a una ventana, en un día lluvioso', estilo: 'cálido y acogedor', camara: 'primer plano con un ligero acercamiento', duracion: '5', ratio: '9:16', sonido: 'lluvia suave' } }
+  ],
+  libre: [
+    { name: 'Menú de la semana', vals: { goal: 'Ayúdame a planear una semana de comidas saludables y baratas para dos personas', format: 'tabla', context: 'No tenemos horno, solo estufa' } }
+  ]
+};
+
+function renderExamples() {
+  const box = $('examples');
+  box.innerHTML = '';
+  const list = EXAMPLES[cur] || [];
+  box.hidden = !list.length;
+  if (!list.length) return;
+  const lbl = document.createElement('span');
+  lbl.className = 'lbl';
+  lbl.textContent = 'Ejemplos:';
+  box.appendChild(lbl);
+  list.forEach(ex => {
+    const b = document.createElement('button');
+    b.className = 'ex';
+    b.textContent = ex.name;
+    b.addEventListener('click', () => applyExample(ex));
+    box.appendChild(b);
+  });
+}
+
+function applyExample(ex) {
+  Object.keys(FIELDS).forEach(id => { delete vals[id]; });
+  Object.assign(vals, ex.vals);
+  renderForm();
+  update();
+  toast('Ejemplo cargado');
+}
+
+// ---------- Desde una imagen o video (usa a Claude) ----------
+const ANALYZE_NAME = '🔍 Desde imagen o video';
+let SAMPLE = null;
+let SAMPLE_IMAGES = 0;
+let analysis = { text: '' };
+const an = { mode: 'imagen', blobs: [], thumbs: [], times: null, meta: null, busy: false, ctl: null };
+
+async function initSample() {
+  try {
+    if (window.claude && window.claude.use) {
+      const s = await window.claude.use('sample');
+      if (s) {
+        SAMPLE = s;
+        try {
+          const lim = await s.limits();
+          SAMPLE_IMAGES = lim && lim.images ? lim.images.maxCount : 0;
+        } catch (e) { SAMPLE_IMAGES = 0; }
+      }
+    }
+  } catch (e) { /* sin Claude */ }
+  if (cur === 'analizar') renderForm();
+}
+
+function setProgress(t) {
+  const el = document.getElementById('an-status');
+  if (el) el.textContent = t || '';
+}
+
+function waitFor(el, evt, ms) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => { cleanup(); reject(new Error('timeout')); }, ms);
+    const ok = () => { cleanup(); resolve(); };
+    const bad = () => { cleanup(); reject(new Error('error')); };
+    function cleanup() {
+      clearTimeout(t);
+      el.removeEventListener(evt, ok);
+      el.removeEventListener('error', bad);
+    }
+    el.addEventListener(evt, ok);
+    el.addEventListener('error', bad);
+  });
+}
+
+function toJpeg(source, sw, sh, maxSide, q) {
+  const scale = Math.min(1, maxSide / Math.max(sw, sh));
+  const w = Math.max(1, Math.round(sw * scale));
+  const h = Math.max(1, Math.round(sh * scale));
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  c.getContext('2d').drawImage(source, 0, 0, w, h);
+  return new Promise((resolve, reject) =>
+    c.toBlob(b => (b ? resolve(b) : reject(new Error('toBlob'))), 'image/jpeg', q));
+}
+
+function thumbOf(source, sw, sh) {
+  const scale = Math.min(1, 180 / Math.max(sw, sh));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(sw * scale));
+  c.height = Math.max(1, Math.round(sh * scale));
+  c.getContext('2d').drawImage(source, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.6);
+}
+
+function readDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(new Error('read'));
+    r.readAsDataURL(file);
+  });
+}
+
+async function loadImage(file) {
+  const img = new Image();
+  img.src = await readDataUrl(file);
+  if (!img.complete) await waitFor(img, 'load', 15000);
+  if (!img.naturalWidth) throw new Error('decode');
+  return img;
+}
+
+// Toma n fotogramas repartidos a lo largo del video, sin subir el video a ninguna parte
+async function extractFrames(file, n) {
+  const url = URL.createObjectURL(file);
+  const v = document.createElement('video');
+  v.muted = true;
+  v.playsInline = true;
+  v.preload = 'auto';
+  v.setAttribute('playsinline', '');
+  v.src = url;
+  try {
+    v.load();
+    await waitFor(v, 'loadeddata', 20000);
+    const dur = v.duration;
+    if (!isFinite(dur) || dur <= 0) throw new Error('duration');
+    const w = v.videoWidth, h = v.videoHeight;
+    const frames = [], thumbs = [], times = [];
+    for (let i = 0; i < n; i++) {
+      const t = Math.min(dur - 0.05, Math.max(0, ((i + 0.5) / n) * dur));
+      const seek = waitFor(v, 'seeked', 8000);
+      v.currentTime = t;
+      await seek;
+      frames.push(await toJpeg(v, w, h, 1024, 0.85));
+      thumbs.push(thumbOf(v, w, h));
+      times.push(Math.round(t * 10) / 10);
+      setProgress(`Preparando fotogramas… ${i + 1}/${n}`);
+    }
+    return { frames, thumbs, times, meta: { dur: Math.round(dur * 10) / 10, w, h, times } };
+  } finally {
+    URL.revokeObjectURL(url);
+    v.removeAttribute('src');
+    v.load();
+  }
+}
+
+async function prepare(files) {
+  an.blobs = []; an.thumbs = []; an.times = null; an.meta = null;
+  renderThumbs();
+  const max = Math.max(1, Math.min(SAMPLE_IMAGES || 1, 8));
+  const isVideo = an.mode === 'video' && files[0].type.startsWith('video/');
+  setProgress('Preparando…');
+  try {
+    if (an.mode === 'imagen') {
+      const img = await loadImage(files[0]);
+      an.blobs = [await toJpeg(img, img.naturalWidth, img.naturalHeight, 1600, 0.88)];
+      an.thumbs = [thumbOf(img, img.naturalWidth, img.naturalHeight)];
+    } else if (isVideo) {
+      const r = await extractFrames(files[0], max);
+      an.blobs = r.frames; an.thumbs = r.thumbs; an.times = r.times; an.meta = r.meta;
+    } else {
+      for (const f of files.slice(0, max)) {
+        const img = await loadImage(f);
+        an.blobs.push(await toJpeg(img, img.naturalWidth, img.naturalHeight, 1024, 0.85));
+        an.thumbs.push(thumbOf(img, img.naturalWidth, img.naturalHeight));
+      }
+      an.meta = { shots: an.blobs.length };
+    }
+    setProgress('');
+  } catch (e) {
+    an.blobs = []; an.thumbs = []; an.times = null; an.meta = null;
+    setProgress(isVideo
+      ? 'No pude abrir ese video aquí. Prueba subiendo capturas de pantalla del video, en orden.'
+      : 'No pude abrir ese archivo. Prueba con otra imagen (JPG o PNG).');
+  }
+  renderThumbs();
+  refreshAnalyzeButtons();
+}
+
+function renderThumbs() {
+  const box = document.getElementById('an-thumbs');
+  if (!box) return;
+  box.innerHTML = '';
+  an.thumbs.forEach((src, i) => {
+    const fig = document.createElement('figure');
+    const im = document.createElement('img');
+    im.src = src;
+    im.alt = '';
+    fig.appendChild(im);
+    if (an.times) {
+      const cap = document.createElement('figcaption');
+      cap.textContent = an.times[i] + ' s';
+      fig.appendChild(cap);
+    }
+    box.appendChild(fig);
+  });
+}
+
+function refreshAnalyzeButtons() {
+  const go = document.getElementById('an-go');
+  const stop = document.getElementById('an-stop');
+  if (go) go.disabled = !an.blobs.length || an.busy;
+  if (stop) stop.hidden = !an.busy;
+}
+
+function errorCopy(code) {
+  switch (code) {
+    case 'not_granted': return 'Para analizar necesitas permitir que esta página use a Claude. Vuelve a tocar el botón y acepta el aviso.';
+    case 'sampling_disabled': return 'Claude no está disponible en tu cuenta para esta función.';
+    case 'rate_limited': return 'Llegaste a un límite de uso o hiciste demasiados intentos. Espera un momento e inténtalo de nuevo.';
+    case 'image_rejected': return 'Claude no aceptó esa imagen. Prueba con otra (JPG o PNG).';
+    case 'images_unavailable': return 'Esta vista no permite enviar imágenes a Claude.';
+    case 'refused': return 'Claude no pudo analizar este contenido. Prueba con otro.';
+    case 'session_expired': return 'Tu sesión de Claude venció. Vuelve a iniciarla e inténtalo otra vez.';
+    default: return 'Algo falló al analizar. Intenta de nuevo.';
+  }
+}
+
+async function analyze() {
+  if (!SAMPLE || !an.blobs.length || an.busy) return;
+  an.busy = true;
+  an.ctl = new AbortController();
+  $('out').value = '';
+  analysis.text = '';
+  refreshAnalyzeButtons();
+  update(); // desactiva copiar, compartir y guardar mientras se escribe
+  setProgress('Pensando…');
+  const extraEl = document.getElementById('an-extra');
+  const prompt = analysisPrompt(an.mode, an.meta, extraEl ? extraEl.value.trim() : '', vals.promptLang === 'en');
+  try {
+    const res = await SAMPLE(prompt, {
+      images: an.blobs,
+      modelTier: 'default',
+      signal: an.ctl.signal,
+      onText: ({ text }) => { $('out').value = text; setProgress('Escribiendo…'); }
+    });
+    analysis.text = res.text.trim();
+    $('out').value = analysis.text;
+    setProgress(res.truncated
+      ? 'El prompt salió cortado. Prueba con algo más sencillo.'
+      : 'Listo. Puedes editarlo antes de copiarlo.');
+  } catch (e) {
+    const code = e && e.code;
+    if (code === 'cancelled') {
+      $('out').value = (e && e.text) || '';
+      analysis.text = $('out').value;
+      setProgress('Detenido.');
+    } else {
+      $('out').value = '';
+      setProgress(errorCopy(code));
+    }
+  } finally {
+    an.busy = false;
+    an.ctl = null;
+    refreshAnalyzeButtons();
+    update();
+  }
+}
+
+function renderAnalyzer() {
+  const box = $('form');
+  box.innerHTML = '';
+  const note = t => {
+    const d = document.createElement('div');
+    d.className = 'an-note';
+    d.textContent = t;
+    return d;
+  };
+
+  if (!SAMPLE || !SAMPLE_IMAGES) {
+    box.appendChild(note(
+      'Esta función usa a Claude para mirar tu imagen o video y escribir el prompt que sirva para recrearlo. ' +
+      'Solo está disponible cuando abres esta página dentro de Claude. En la versión de GitHub no funciona.'));
+    return;
+  }
+
+  const seg = document.createElement('div');
+  seg.className = 'seg';
+  [['imagen', '📷 Imagen'], ['video', '🎞️ Video']].forEach(([m, label]) => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.className = an.mode === m ? 'on' : '';
+    b.addEventListener('click', () => {
+      if (an.busy) return;
+      an.mode = m;
+      an.blobs = []; an.thumbs = []; an.times = null; an.meta = null;
+      renderAnalyzer();
+    });
+    seg.appendChild(b);
+  });
+  box.appendChild(seg);
+
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.hidden = true;
+  input.accept = an.mode === 'imagen' ? 'image/*' : 'video/*,image/*';
+  input.multiple = an.mode === 'video';
+  input.addEventListener('change', () => {
+    const files = [...input.files];
+    input.value = '';
+    if (files.length) prepare(files);
+  });
+  const pick = document.createElement('button');
+  pick.className = 'pick';
+  pick.textContent = an.mode === 'imagen' ? 'Elegir una imagen' : 'Elegir un video (o varias capturas)';
+  pick.addEventListener('click', () => { if (!an.busy) input.click(); });
+  box.append(input, pick);
+
+  const thumbs = document.createElement('div');
+  thumbs.id = 'an-thumbs';
+  thumbs.className = 'thumbs';
+  box.appendChild(thumbs);
+
+  const fld = document.createElement('div');
+  fld.className = 'fld';
+  const lab = document.createElement('label');
+  lab.textContent = 'Cambio o detalle a resaltar ';
+  const opt = document.createElement('span');
+  opt.className = 'opt';
+  opt.textContent = '(opcional)';
+  lab.appendChild(opt);
+  const extra = document.createElement('input');
+  extra.id = 'an-extra';
+  extra.autocomplete = 'off';
+  extra.placeholder = 'Ej.: igual, pero de noche y en estilo anime';
+  fld.append(lab, extra);
+  box.appendChild(fld);
+
+  const actions = document.createElement('div');
+  actions.className = 'an-actions';
+  const go = document.createElement('button');
+  go.id = 'an-go';
+  go.className = 'go';
+  go.textContent = 'Analizar y crear prompt';
+  go.disabled = true;
+  go.addEventListener('click', analyze);
+  const stop = document.createElement('button');
+  stop.id = 'an-stop';
+  stop.className = 'stop';
+  stop.textContent = 'Detener';
+  stop.hidden = true;
+  stop.addEventListener('click', () => { if (an.ctl) an.ctl.abort(); });
+  actions.append(go, stop);
+  box.appendChild(actions);
+
+  const st = document.createElement('div');
+  st.id = 'an-status';
+  st.className = 'an-status';
+  box.appendChild(st);
+
+  box.appendChild(note(
+    'Se envía la imagen (o unos 8 fotogramas del video) a Claude, con tu cuenta, y gasta parte de tu uso. ' +
+    'El video completo no se sube a ningún lado. Claude no oye el audio, y el movimiento de cámara lo deduce comparando fotogramas, ' +
+    'así que el resultado es una muy buena base para ajustar, no una copia exacta.'));
+
+  renderThumbs();
+  refreshAnalyzeButtons();
+}
+
 // ---------- Inicio ----------
 (function init() {
   const saved = load(STATE_KEY, null);
-  if (saved && saved.cur in TYPES) {
+  if (saved && (saved.cur in TYPES || saved.cur === 'analizar')) {
     cur = saved.cur;
     vals = Object.assign(vals, saved.vals || {});
   }
@@ -589,8 +1139,10 @@ $('save').addEventListener('click', () => {
   syncAdvanced();
   renderTypes();
   renderForm();
+  renderExamples();
   renderLib();
   update();
+  initSample();
 })();
 </script>
 </body>
