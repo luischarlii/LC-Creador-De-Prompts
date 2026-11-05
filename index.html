@@ -806,7 +806,7 @@ const ANALYZE_NAME = '🔍 Desde imagen o video';
 let SAMPLE = null;
 let SAMPLE_IMAGES = 0;
 let analysis = { text: '' };
-const an = { mode: 'imagen', blobs: [], thumbs: [], times: null, meta: null, busy: false, ctl: null };
+const an = { mode: 'imagen', blobs: [], thumbs: [], times: null, meta: null, busy: false, ctl: null, local: null, forced: false };
 
 async function initSample() {
   try {
@@ -1028,6 +1028,182 @@ async function analyze() {
   }
 }
 
+
+// ---------- Análisis local de video (sin IA, sin conexión) ----------
+const HUE_NAMES = [[15,'rojo'],[45,'naranja'],[70,'amarillo'],[165,'verde'],[200,'turquesa'],[255,'azul'],[290,'morado'],[340,'rosa'],[361,'rojo']];
+const WARM = ['rojo','naranja','amarillo'];
+const COOL = ['verde','turquesa','azul','morado'];
+
+function pixelBucket(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  const l = (mx + mn) / 2;
+  const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+  let h = 0;
+  if (d) {
+    if (mx === r) h = ((g - b) / d) % 6;
+    else if (mx === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h = (h * 60 + 360) % 360;
+  }
+  let name;
+  if (l < 0.15) name = 'negro';
+  else if (l > 0.88) name = 'blanco';
+  else if (s < 0.18) name = 'gris';
+  else name = HUE_NAMES.find(x => h < x[0])[1];
+  return { name, l: (0.2126 * r + 0.7152 * g + 0.0722 * b) };
+}
+
+function listEs(a) {
+  return a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' y ' + a[a.length - 1];
+}
+
+async function sampleLocal(file) {
+  const url = URL.createObjectURL(file);
+  const v = document.createElement('video');
+  v.muted = true; v.playsInline = true; v.preload = 'auto';
+  v.setAttribute('playsinline', '');
+  v.src = url;
+  try {
+    v.load();
+    await waitFor(v, 'loadeddata', 20000);
+    const dur = v.duration;
+    if (!isFinite(dur) || dur <= 0) throw new Error('duration');
+    const w = v.videoWidth, h = v.videoHeight;
+    const P = 8, S = 40;
+    const gap = Math.min(0.3, dur / (P * 4));
+    const c = document.createElement('canvas');
+    c.width = S; c.height = S;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    const grab = async t => {
+      const sk = waitFor(v, 'seeked', 8000);
+      v.currentTime = t;
+      await sk;
+      ctx.drawImage(v, 0, 0, S, S);
+      return ctx.getImageData(0, 0, S, S).data;
+    };
+    const counts = {}, thumbs = [], times = [], motions = [];
+    let total = 0, sumL = 0;
+    for (let i = 0; i < P; i++) {
+      let t = ((i + 0.5) / P) * dur;
+      t = Math.max(0.05, Math.min(t, dur - gap - 0.05));
+      const a = await grab(t);
+      thumbs.push(thumbOf(v, w, h));
+      times.push(Math.round(t * 10) / 10);
+      for (let k = 0; k < a.length; k += 4) {
+        const p = pixelBucket(a[k], a[k + 1], a[k + 2]);
+        counts[p.name] = (counts[p.name] || 0) + 1;
+        sumL += p.l; total++;
+      }
+      const b = await grab(t + gap);
+      let diff = 0;
+      for (let k = 0; k < a.length; k += 4) {
+        const la = 0.2126 * a[k] + 0.7152 * a[k + 1] + 0.0722 * a[k + 2];
+        const lb = 0.2126 * b[k] + 0.7152 * b[k + 1] + 0.0722 * b[k + 2];
+        diff += Math.abs(la - lb);
+      }
+      motions.push(diff / (S * S) / 255);
+      setProgress(`Analizando… ${i + 1}/${P}`);
+    }
+
+    // proporción
+    const r = w / h;
+    const ratios = [['1:1', 1], ['4:5', 0.8], ['9:16', 0.5625], ['16:9', 16 / 9]];
+    const ratio = ratios.reduce((best, x) =>
+      Math.abs(Math.log(r / x[1])) < Math.abs(Math.log(r / best[1])) ? x : best)[0];
+    // duración (la opción más cercana)
+    const durs = [5, 10, 15, 30, 60];
+    const durOpt = String(durs.reduce((best, x) => Math.abs(x - dur) < Math.abs(best - dur) ? x : best));
+    // colores
+    const entries = Object.entries(counts).sort((x, y) => y[1] - x[1]);
+    const top = entries.filter(e => e[1] / total >= 0.1).slice(0, 3).map(e => e[0]);
+    if (!top.length && entries.length) top.push(entries[0][0]);
+    const warmC = WARM.reduce((n, k) => n + (counts[k] || 0), 0);
+    const coolC = COOL.reduce((n, k) => n + (counts[k] || 0), 0);
+    let temp = '';
+    if ((warmC + coolC) / total > 0.2) temp = warmC > coolC * 1.5 ? 'cálidos' : coolC > warmC * 1.5 ? 'fríos' : '';
+    const colores = (temp ? `tonos ${temp}: ` : '') + listEs(top);
+    // luz
+    const L = sumL / total;
+    const luz = L < 0.25 ? 'escena oscura, con poca luz'
+      : L < 0.45 ? 'luz tenue'
+      : L < 0.7 ? 'luz natural equilibrada'
+      : 'luz brillante';
+    // movimiento (mediana de la diferencia entre dos fotogramas cercanos)
+    const sorted = motions.slice().sort((x, y) => x - y);
+    const med = (sorted[3] + sorted[4]) / 2;
+    const camara = med < 0.015 ? 'cámara fija o casi sin movimiento'
+      : med < 0.06 ? 'movimiento suave de cámara o de la escena'
+      : 'movimiento dinámico y rápido';
+
+    return { dur: Math.round(dur * 10) / 10, w, h, ratio, durOpt, colores, luz, camara, thumbs, times };
+  } finally {
+    URL.revokeObjectURL(url);
+    v.removeAttribute('src');
+    v.load();
+  }
+}
+
+async function runLocal(file) {
+  if (an.busy) return;
+  an.busy = true;
+  an.local = null; an.thumbs = []; an.times = null;
+  renderThumbs();
+  showLocalResult();
+  setProgress('Abriendo el video…');
+  try {
+    const r = await sampleLocal(file);
+    an.local = r; an.thumbs = r.thumbs; an.times = r.times;
+    setProgress('');
+  } catch (e) {
+    setProgress('No pude abrir ese video aquí. Prueba con otro (MP4 o MOV).');
+  } finally {
+    an.busy = false;
+  }
+  renderThumbs();
+  showLocalResult();
+}
+
+function showLocalResult() {
+  const box = document.getElementById('an-result');
+  if (!box) return;
+  box.innerHTML = '';
+  const r = an.local;
+  if (!r) return;
+  const ul = document.createElement('div');
+  ul.className = 'an-note';
+  ul.style.color = 'var(--fg)';
+  ul.style.lineHeight = '1.7';
+  [
+    ['Duración', `${r.dur} s`],
+    ['Formato', `${r.w}×${r.h} (se usará ${r.ratio})`],
+    ['Colores', r.colores],
+    ['Luz', r.luz],
+    ['Movimiento', r.camara]
+  ].forEach(([k, val]) => {
+    const row = document.createElement('div');
+    const b = document.createElement('b');
+    b.textContent = k + ': ';
+    row.append(b, document.createTextNode(val));
+    ul.appendChild(row);
+  });
+  const go = document.createElement('button');
+  go.className = 'go';
+  go.style.marginTop = '12px';
+  go.textContent = 'Pasar al formulario de video';
+  go.addEventListener('click', applyLocal);
+  box.append(ul, go);
+}
+
+function applyLocal() {
+  const r = an.local;
+  if (!r) return;
+  Object.assign(vals, { ratio: r.ratio, duracion: r.durOpt, luz: r.luz, colores: r.colores, camara: r.camara });
+  selectType('video');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  toast('Listo. Ahora cuenta qué pasa en la escena');
+}
+
 function renderAnalyzer() {
   const box = $('form');
   box.innerHTML = '';
@@ -1038,42 +1214,43 @@ function renderAnalyzer() {
     return d;
   };
 
-  if (!SAMPLE || !SAMPLE_IMAGES) {
-    box.appendChild(note(
-      'Esta función usa a Claude para mirar tu imagen o video y escribir el prompt que sirva para recrearlo. ' +
-      'Solo está disponible cuando abres esta página dentro de Claude. En la versión de GitHub no funciona.'));
-    return;
-  }
+  const hasAI = !!(SAMPLE && SAMPLE_IMAGES);
+  if (!hasAI) { an.mode = 'local'; an.forced = true; }
+  else if (an.forced) { an.mode = 'imagen'; an.forced = false; }
 
-  const seg = document.createElement('div');
-  seg.className = 'seg';
-  [['imagen', '📷 Imagen'], ['video', '🎞️ Video']].forEach(([m, label]) => {
-    const b = document.createElement('button');
-    b.textContent = label;
-    b.className = an.mode === m ? 'on' : '';
-    b.addEventListener('click', () => {
-      if (an.busy) return;
-      an.mode = m;
-      an.blobs = []; an.thumbs = []; an.times = null; an.meta = null;
-      renderAnalyzer();
+  if (hasAI) {
+    const seg = document.createElement('div');
+    seg.className = 'seg';
+    [['imagen', '📷 Imagen'], ['video', '🎞️ Video'], ['local', '📊 Sin IA']].forEach(([m, label]) => {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.className = an.mode === m ? 'on' : '';
+      b.addEventListener('click', () => {
+        if (an.busy) return;
+        an.mode = m;
+        an.blobs = []; an.thumbs = []; an.times = null; an.meta = null; an.local = null;
+        renderAnalyzer();
+      });
+      seg.appendChild(b);
     });
-    seg.appendChild(b);
-  });
-  box.appendChild(seg);
+    box.appendChild(seg);
+  }
 
   const input = document.createElement('input');
   input.type = 'file';
   input.hidden = true;
-  input.accept = an.mode === 'imagen' ? 'image/*' : 'video/*,image/*';
+  input.accept = an.mode === 'imagen' ? 'image/*' : an.mode === 'video' ? 'video/*,image/*' : 'video/*';
   input.multiple = an.mode === 'video';
   input.addEventListener('change', () => {
     const files = [...input.files];
     input.value = '';
-    if (files.length) prepare(files);
+    if (!files.length) return;
+    if (an.mode === 'local') runLocal(files[0]); else prepare(files);
   });
   const pick = document.createElement('button');
   pick.className = 'pick';
-  pick.textContent = an.mode === 'imagen' ? 'Elegir una imagen' : 'Elegir un video (o varias capturas)';
+  pick.textContent = an.mode === 'imagen' ? 'Elegir una imagen'
+    : an.mode === 'video' ? 'Elegir un video (o varias capturas)' : 'Elegir un video';
   pick.addEventListener('click', () => { if (!an.busy) input.click(); });
   box.append(input, pick);
 
@@ -1081,6 +1258,24 @@ function renderAnalyzer() {
   thumbs.id = 'an-thumbs';
   thumbs.className = 'thumbs';
   box.appendChild(thumbs);
+
+  if (an.mode === 'local') {
+    const st = document.createElement('div');
+    st.id = 'an-status';
+    st.className = 'an-status';
+    box.appendChild(st);
+    const res = document.createElement('div');
+    res.id = 'an-result';
+    box.appendChild(res);
+    box.appendChild(note(
+      'Todo pasa en tu teléfono: no usa a Claude, no necesita conexión y el video no se sube a ningún lado. ' +
+      'Detecta duración, formato, colores, luz y cuánto movimiento hay, y llena el formulario de video. ' +
+      'No puede saber qué aparece en la escena: eso lo escribes tú en una línea. El movimiento es aproximado.'));
+    if (!hasAI) box.appendChild(note('Analizar con Claude una imagen o un video solo está disponible cuando abres esta página dentro de Claude.'));
+    renderThumbs();
+    showLocalResult();
+    return;
+  }
 
   const fld = document.createElement('div');
   fld.className = 'fld';
